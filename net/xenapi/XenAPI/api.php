@@ -56,7 +56,7 @@ if ($restAPI->getAPIKey() !== NULL && $restAPI->isDefaultAPIKey()) {
 $restAPI->processRequest();
 
 class RestAPI {
-    const VERSION = '1.4.2';
+    const VERSION = '1.4.3';
     const DEFAULT_APIKEY = 'REPLACE_THIS_WITH_AN_API_KEY';
     const GENERAL_ERROR = 0x201;
     const USER_ERROR = 0x202;
@@ -126,7 +126,8 @@ class RestAPI {
         'login'                    => 'public', 
         'register'                 => 'api_key',
         'search'                   => 'public',
-        'upgradeuser'              => 'api_key'
+        'upgradeuser'              => 'api_key',
+        'searchthreads'            => 'authenticated', 
     );
     
     // Array of actions that are user specific and require an username, ID or email for the 'value' parameter.
@@ -158,7 +159,9 @@ class RestAPI {
         21 => 'The "{ERROR}" argument has to be a number',
         22 => 'The argument for "order_by", "{ERROR}", was not found in the list available order by list: "({ERROR2})"',
         23 => 'The argument for "node_type", "{ERROR}", was not found in the list available node type list: "({ERROR2})"',
-        24 => 'The argument for "discussion_state", "{ERROR}", was not found in the list available discussion state list: "({ERROR2})"'
+        24 => 'The argument for "discussion_state", "{ERROR}", was not found in the list available discussion state list: "({ERROR2})"',
+        25 => 'Arguments "{ERROR}" and "{ERROR2}" conflict. Only one allowed',
+        
     );
 
     // Specific errors related to user actions.
@@ -577,6 +580,23 @@ class RestAPI {
     public function getRequest($key) {
         if ($this->hasRequest($key)) {
             return $this->data[strtolower($key)];
+        } else {
+            return FALSE;
+        }
+    }
+    
+    /**
+    * Delete request variable or change name
+    * @param string variable name
+    * @param string new variable name
+    * @return bool operation status
+    */
+    public function deleteRequest($key, $move_key = NULL) {
+        if ($this->hasRequest($key)) {
+            if(!empty($move_key))
+                $this->data[strtolower($move_key)] = $this->data[strtolower($key)];
+            unset($this->data[strtolower($key)]);
+            return TRUE;
         } else {
             return FALSE;
         }
@@ -2607,6 +2627,94 @@ class RestAPI {
 
                 // Send the response.
                 $this->sendResponse(array('count' => count($threads), 'threads' => $threads));
+                
+            case 'searchthreads':
+                $conditions = array();
+                /**
+                * Return a list of threads
+                * 
+                * EXAMPLES: 
+                *   - api.php?action=searchThreads&title=Some*&state=visible&open=1&type=team&inc_nodes=1,2&ex_nodes=3,4&hash=API_KEY
+                */
+                // Check node list to search (include and exclude nodes)
+                foreach(Array('inc_nodes', 'ex_nodes') AS $node_search_type) {
+                    if ($this->hasRequest($node_search_type)) {
+                       // Throw error if the $node_search_type argument is set but empty.
+                        if ($this->getRequest($node_search_type) != '') {
+                            $this->throwError(1, $node_search_type);
+                        }
+                        // Only numbers allowed
+                        $_node = explode(',', $this->getRequest($node_search_type));
+                        $_node = array_filter($_node, "ctype_digit");
+                        if (empty($_node)) {
+                            $this->throwError(1, $node_search_type);
+                        }
+                        // TODO: add `$this->xenAPI->getNode()` test? I'm think: NO, because this is dictionary argument.
+                        $conditions[$node_search_type] = $_node;
+                    }
+                }
+                if ($this->hasRequest('value')) {
+                   // Throw error if the 'title' argument is set but empty.
+                    if ($this->getRequest('value') != '') {
+                        $this->throwError(1, 'value');
+                    }
+                    $conditions['title'] = $this->getRequest('value');
+                }
+                //discussion_open
+                if ($this->hasRequest('open')) {
+                    if (in_array(strtolower($this->getRequest('open')), Array('n','no','false','0',''))) {
+                        $conditions['open'] = 0;
+                    } else {
+                        $conditions['open'] = 1;
+                    }
+                }
+                
+                // discussion_state
+                if ($this->hasRequest('state')) {
+                    if(!in_array(strtolower($this->getRequest('state')), Array('visible', 'moderated', 'deleted'))) {
+                        $this->throwError(1, 'state');
+                    }
+                    $conditions['state'] = strtolower($this->getRequest('state'));
+                }
+                
+                //discussion_type
+                if ($this->hasRequest('type')) {
+                    $conditions['type'] = strtolower($this->getRequest('type'));
+                }
+                
+                if (empty($conditions)) {
+                    $this->throwError(8, 'value, state, open, type, inc_nodes, ex_nodes');
+                }
+                
+                // Generate where condition
+                $where = Array();
+                if (isset($conditions['inc_nodes'])) {
+                    $where[] = "node_id IN(".join(",", $conditions['inc_nodes']).")";
+                }
+                if (isset($conditions['ex_nodes'])) {
+                    $where[] = "node_id NOT IN(".join(",", $conditions['ex_nodes']).")";
+                }
+                if (isset($conditions['title'])) {
+                    $where[] = "title LIKE ".strtr($this->xenAPI->getDatabase()->quote($conditions['title']),"*","%");
+                }
+                if (isset($conditions['open'])) {
+                    $where[] = "discussion_open = ".$conditions['open'];
+                }
+                if (isset($discussion_state['state'])) {
+                    $where[] = "discussion_open = ".$this->xenAPI->getDatabase()->quote($conditions['state']);
+                }
+                if (isset($discussion_state['type'])) {
+                    $where[] = "discussion_type = ".$this->xenAPI->getDatabase()->quote($conditions['type']);
+                }
+                
+                $q = " SELECT thread_id, node_id, title, discussion_open, last_post_id FROM xf_thread WHERE ".join(' AND ', $where) ." ORDER BY title";
+                
+                // Perform the SQL query
+                $results = $this->xenAPI->getDatabase()->fetchAll($q);
+                
+                // Send the response.
+                $this->sendResponse($results);
+                
             case 'getuser': 
                 /**
                 * Grabs and returns an user object.
@@ -2631,7 +2739,7 @@ class RestAPI {
                 *   - api.php?action=getUsers&value=C*
                 */
 
-                if ($this->hasRequest('value') && strpos($this->getRequest('value', ',')) !== false) {
+                if ($this->hasRequest('value') && strpos($this->getRequest('value'), ',') !== false) {
                     $userIds = explode(',', $this->getRequest('value'));
                     $results = [];
                     foreach ($userIds as $userId) {
@@ -2671,9 +2779,8 @@ class RestAPI {
                     $order_by_field = $this->checkOrderBy(array('user_id', 'message_count', 'conversations_unread', 'register_date', 'last_activity', 'trophy_points', 'alerts_unread', 'like_count'));
                     
                     // Perform the SQL query and grab all the usernames and user id's.
-                    // Perform the SQL query and grab all the usernames and user id's.
                     $results = $this->xenAPI->getDatabase()->fetchAll("SELECT `user_id`, `username`" 
-                        . ($this->hasRequest('order_by') ? ", " . $this->xenAPI->getDatabase()->quote($order_by_field) : '') 
+                        . ($this->hasRequest('order_by') ? ", " . $order_by_field : '') 
                         . " FROM `xf_user`" . ($this->hasRequest('value') ? " WHERE `username` LIKE " . $this->xenAPI->getDatabase()->quote($string) : '') 
                         . ($this->hasRequest('order_by') ? " ORDER BY `$order_by_field` " . $this->order : '') 
                         . (($this->limit > 0) ? ' LIMIT ' . $this->xenAPI->getDatabase()->quote($this->limit) : ''));
