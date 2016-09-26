@@ -2153,10 +2153,16 @@ class RestAPI {
                 }
 
                 // Check if request has node id.
+                $nodes = false;
                 if ($this->hasRequest('node_id')) {
-                    if (!$this->getRequest('node_id') && (is_numeric($this->getRequest('node_id')) && $this->getRequest('node_id') != 0)) {
+                    if (!$this->getRequest('node_id') && (is_numeric($this->getRequest('node_id')) && $this->getRequest('node_id') != 0) && strpos($this->getRequest('node_id'),',') === FALSE) {
                         // Throw error if the 'node_id' argument is set but empty.
                         $this->throwError(1, 'node_id');
+                    } else if (strpos($this->getRequest('node_id'),',') !== FALSE) {
+                        $nodes = explode(',', $this->getRequest('node_id'));
+                        $nodes = array_filter($nodes, "ctype_digit");
+                        if(empty($nodes))
+                            $this->throwError(1, 'node_id');
                     } else if (!is_numeric($this->getRequest('node_id'))) {
                         // Throw error if the 'node_id' argument is set but not a number.
                         $this->throwError(21, 'node_id');
@@ -2166,9 +2172,20 @@ class RestAPI {
                         $this->throwError(4, 'node', $this->getRequest('node_id'));
                     }
                     // Add the node ID to the query conditions.
-                    $conditions['node_id'] = $this->getRequest('node_id');
+                    $conditions['node_id'] = !empty($nodes) ? $nodes : $this->getRequest('node_id');
                 }
 
+                if ($this->hasRequest('node_exclude')) {
+                    if (!$this->getRequest('node_exclude') 0 {
+                        $this->throwError(1, 'node_exclude');
+                    }
+                    
+                    $nodes = explode(',', $this->getRequest('node_exclude'));
+                    $nodes = array_filter($nodes, "ctype_digit");
+                    if(empty($nodes))
+                        $this->throwError(1, 'node_id');
+                    $conditions['node_exclude'] = $nodes;
+                }
                 // Check if request has thread id.
                 if ($this->hasRequest('thread_id')) {
                     if (!$this->getRequest('thread_id') && (is_numeric($this->getRequest('thread_id')) && $this->getRequest('thread_id') != 0)) {
@@ -2655,7 +2672,7 @@ class RestAPI {
                 }
                 if ($this->hasRequest('value')) {
                    // Throw error if the 'title' argument is set but empty.
-                    if ($this->getRequest('value') != '') {
+                    if ($this->getRequest('value') == '') {
                         $this->throwError(1, 'value');
                     }
                     $conditions['title'] = $this->getRequest('value');
@@ -4533,7 +4550,7 @@ class XenAPI {
     * Returns a list of posts.
     */
     public function getPosts($conditions = array(), $fetchOptions = array('limit' => 10), $user = NULL) {
-        if (!empty($conditions['node_id']) || (!empty($fetchOptions['order']) && strtolower($fetchOptions['order']) == 'node_id')) {
+        if (!empty($conditions['node_id']) || !empty($conditions['node_exclude']) || (!empty($fetchOptions['order']) && strtolower($fetchOptions['order']) == 'node_id')) {
             // We need to grab the thread info to get the node_id.
             $fetchOptions = array_merge($fetchOptions, array('join' => XenForo_Model_Post::FETCH_THREAD));
         }
@@ -5259,6 +5276,13 @@ class Post {
                 $sqlConditions[] = 'thread.node_id IN (' . $db->quote($conditions['node_id']) . ')';
             } else {
                 $sqlConditions[] = 'thread.node_id = ' . $db->quote($conditions['node_id']);
+            }
+        }
+        if (!empty($conditions['node_exclude'])) {
+            if (is_array($conditions['node_exclude'])) {
+                $sqlConditions[] = 'thread.node_id NOT IN (' . $db->quote($conditions['node_exclude']) . ')';
+            } else {
+                $sqlConditions[] = 'thread.node_id <> ' . $db->quote($conditions['node_exclude']);
             }
         }
 
