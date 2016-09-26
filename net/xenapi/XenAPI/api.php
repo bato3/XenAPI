@@ -1674,7 +1674,7 @@ class RestAPI {
                 }
 
                 // List of fields that are accepted to be edited.
-                $edit_fields = array('username', 'password', 'email', 'gender', 'custom_title', 'style_id', 'timezone', 'visible', 'dob_day', 'dob_month', 'dob_year', 'user_state', 'trophy_points');
+                $edit_fields = array('username', 'password', 'email', 'gender', 'custom_title', 'style_id', 'timezone', 'visible', 'dob_day', 'dob_month', 'dob_year', 'user_state', 'trophy_points','signature','about');
 
                 // List of fields that the request should ignore.
                 $ignore_fields = array('hash', 'action', 'user');
@@ -2176,7 +2176,7 @@ class RestAPI {
                 }
 
                 if ($this->hasRequest('node_exclude')) {
-                    if (!$this->getRequest('node_exclude') 0 {
+                    if (!$this->getRequest('node_exclude') ) {
                         $this->throwError(1, 'node_exclude');
                     }
                     
