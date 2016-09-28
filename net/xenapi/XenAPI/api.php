@@ -119,6 +119,7 @@ class RestAPI {
         'getstats'                 => 'public',
         'getthread'                => 'public',
         'getthreads'               => 'public',
+        'getthreadsbyids'          => 'public',
         'getuser'                  => 'authenticated', 
         'getusers'                 => 'public',
         'getuserupgrade'           => 'api_key',
@@ -2630,6 +2631,25 @@ class RestAPI {
                 }
 
 
+                if ($this->hasRequest('title') 
+                        && trim($this->getRequest('title')) != '') {
+                    $title = trim($this->getRequest('title'));
+                    if ($this->hasRequest('title_like')){
+                        // TODO: full test allowed only `r`l`
+                        $conditions['title'] = Array($title, $this->getRequest('title_like'));
+                    } else if (strpos($title,'*') !== false) {
+                        $cond = '';
+                        if (substr($title,0,1) == '*')
+                            $cond .= 'l';
+                        if (substr($title,-1) == '*')
+                            $cond .= 'r';
+                        $conditions['title'] = Array(trim($title,'*'),$cond);
+                    } else {
+                        $conditions['title'] = $title;
+                    }
+                }
+                
+                
                 // Check if the order by argument is set.
                 $order_by_field = $this->checkOrderBy(array('title', 'post_date', 'view_count', 'reply_count', 'first_post_likes', 'last_post_date'));
 
@@ -2642,6 +2662,35 @@ class RestAPI {
                 // Get the threads.
                 $threads = $this->getXenAPI()->getThreads($conditions, $fetch_options, $this->getUser());
 
+                // Send the response.
+                $this->sendResponse(array('count' => count($threads), 'threads' => $threads));
+                
+            case 'getthreadsbyids':
+                /**
+                * Returns a list of threads by id.
+                *
+                * EXAMPLES: 
+                *   - api.php?action=getThreadsById&thread_id=1,2,3&hash=USERNAME:HASH
+                *   - api.php?action=getThreadsById&thread_id=1,2,3&hash=API_KEY
+                */
+                // Init variables.
+                $conditions = array();
+                $this->setLimit(100);
+                $fetch_options = array('limit' => $this->limit);
+                
+                if (!$this->hasRequest('thread_id')) {
+                    $this->throwError(3, 'thread_id');
+                }
+                $threads = explode(',', trim($this->getRequest('thread_id')));
+                $threads = array_filter($threads, "ctype_digit");
+                if(empty($threads)) {
+                    $this->throwError(1, 'thread_id');
+                }
+                $conditions['thread_id'] = $threads;
+
+                $this->getXenAPI()->getModels()->checkModel('thread', XenForo_Model::create('XenForo_Model_Thread'));
+                $threads = $this->getXenAPI()->getModels()->getModel('thread')->getThreads($conditions, $fetchOptions);
+                
                 // Send the response.
                 $this->sendResponse(array('count' => count($threads), 'threads' => $threads));
                 
