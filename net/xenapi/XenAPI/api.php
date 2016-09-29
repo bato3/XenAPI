@@ -656,6 +656,50 @@ class RestAPI {
     }
 
     /**
+    * Checks Parameter base.
+    * @param string Parameter name (argument name)
+    * @param mixed Parsed and checked value OR NULL
+    * @param bool Is partametr required
+    * @param bool If parameter is set, than is allowed empty
+    * @return bool - IF TRUE, then can use `$return_value`
+    */
+    public function baseCheckParameter($name, &$return_value, $required = false, $allow_empty = false) {
+        // raw return value
+        $return_value = $this->getRequest($name);
+        
+        // required and not set
+        if ($required && !$this->hasRequest($name)) {
+            $this->throwError(3, 'user');
+        }
+        
+        // not set
+        if (!$this->hasRequest($name)) {
+            return false;
+        }
+        
+        // required if is set
+        if (!$allow_empty && !$this->getRequest($name)) {
+            $this->throwError(1, $name);
+        }
+        
+        return true;
+    }
+    
+    public function checkIntParameter($name, &$return_value, $required = false, $allow_empty = false) {
+        if (!$this->baseCheckParameter($name, $return_value, $required, $allow_empty)) {
+            return false;
+        }
+        
+        if (ctype_digit($this->getRequest($name))) {
+            $return_value = intval($this->getRequest($name));
+            return true;
+        }
+        return false;
+    }
+    
+    
+    
+    /**
     * TODO
     */
     public function getUserErrorID($phrase_name) {
@@ -1684,6 +1728,12 @@ class RestAPI {
                 foreach ($this->data as $data_key => $data_item) {
                     if (!in_array($data_key, $ignore_fields) && in_array($data_key, $edit_fields) && $this->checkRequestParameter($data_key, FALSE)) {
                         $edit_data[$data_key] = $data_item;
+                    }
+                }
+                
+                if ($this->hasAddon('dbtech_shop')){
+                    if ($this->checkIntParameter('add_points', $add_points)) {
+                        $edit_data['dbtech_shop_points'] = ($add_points + imtval($user->dbtech_shop_points));
                     }
                 }
 
