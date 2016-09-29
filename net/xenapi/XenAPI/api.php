@@ -2100,7 +2100,7 @@ class RestAPI {
                 }
                 $string = $this->getRequest('value');
                 // Try to grab the post from XenForo.
-                $post = $this->getXenAPI()->getPost($string, array('join' => XenForo_Model_Post::FETCH_FORUM));
+                $post = $this->getXenAPI()->getPost($string, array('join' => XenForo_Model_Post::FETCH_FORUM | XenForo_Model_Post::FETCH_THREAD));
                 if ($post == NULL) {
                      // Could not find the post, throw error.
                     $this->throwError(19, 'post', $string);
@@ -2531,6 +2531,9 @@ class RestAPI {
                         $fetchOptions['content_limit'] = $this->getRequest('content_limit');
                     }
                 }
+                if ($this->hasRequest('grab_node')) {
+                    $fetchOptions['join'] = XenForo_Model_Thread::FETCH_FORUM;
+                }
 
                 // Try to grab the thread from XenForo.
                 $thread = $this->getXenAPI()->getThread($string, $fetchOptions, $this->getUser());
@@ -2676,7 +2679,7 @@ class RestAPI {
                 // Init variables.
                 $conditions = array();
                 $this->setLimit(100);
-                $fetch_options = array('limit' => $this->limit);
+                $fetchOptions = array('limit' => $this->limit);
                 
                 if (!$this->hasRequest('thread_id')) {
                     $this->throwError(3, 'thread_id');
@@ -2688,8 +2691,12 @@ class RestAPI {
                 }
                 $conditions['thread_id'] = $threads;
 
+                if ($this->hasRequest('grab_node')) {
+                    $fetchOptions['join'] = XenForo_Model_Thread::FETCH_FORUM;
+                }
+                
                 $this->getXenAPI()->getModels()->checkModel('thread', XenForo_Model::create('XenForo_Model_Thread'));
-                $threads = $this->getXenAPI()->getModels()->getModel('thread')->getThreads($conditions, $fetchOptions);
+                $threads = $this->getXenAPI()->getModels()->getModel('thread')->getThreadsByIds($conditions, $fetchOptions);
                 
                 // Send the response.
                 $this->sendResponse(array('count' => count($threads), 'threads' => $threads));
@@ -2755,25 +2762,25 @@ class RestAPI {
                 // Generate where condition
                 $where = Array();
                 if (isset($conditions['inc_nodes'])) {
-                    $where[] = "node_id IN(".join(",", $conditions['inc_nodes']).")";
+                    $where[] = "t.node_id IN(".join(",", $conditions['inc_nodes']).")";
                 }
                 if (isset($conditions['ex_nodes'])) {
-                    $where[] = "node_id NOT IN(".join(",", $conditions['ex_nodes']).")";
+                    $where[] = "t.node_id NOT IN(".join(",", $conditions['ex_nodes']).")";
                 }
                 if (isset($conditions['title'])) {
-                    $where[] = "title LIKE ".strtr($this->xenAPI->getDatabase()->quote($conditions['title']),"*","%");
+                    $where[] = "t.title LIKE ".strtr($this->xenAPI->getDatabase()->quote($conditions['title']),"*","%");
                 }
                 if (isset($conditions['open'])) {
-                    $where[] = "discussion_open = ".$conditions['open'];
+                    $where[] = "t.discussion_open = ".$conditions['open'];
                 }
                 if (isset($discussion_state['state'])) {
-                    $where[] = "discussion_open = ".$this->xenAPI->getDatabase()->quote($conditions['state']);
+                    $where[] = "t.discussion_open = ".$this->xenAPI->getDatabase()->quote($conditions['state']);
                 }
                 if (isset($discussion_state['type'])) {
-                    $where[] = "discussion_type = ".$this->xenAPI->getDatabase()->quote($conditions['type']);
+                    $where[] = "t.discussion_type = ".$this->xenAPI->getDatabase()->quote($conditions['type']);
                 }
                 
-                $q = " SELECT thread_id, node_id, title, discussion_open, last_post_id FROM xf_thread WHERE ".join(' AND ', $where) ." ORDER BY title";
+                $q = " SELECT t.thread_id, t.node_id, t.title, t.discussion_open, t.last_post_id, n.title AS node_title, node_name FROM xf_thread AS t LEFT JOIN xf_node AS n ON t.node_id = n.node_id WHERE ".join(' AND ', $where) ." ORDER BY t.title";
                 
                 // Perform the SQL query
                 $results = $this->xenAPI->getDatabase()->fetchAll($q);
