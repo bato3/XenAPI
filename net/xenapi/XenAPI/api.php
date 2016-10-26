@@ -129,10 +129,12 @@ class RestAPI {
         'search'                   => 'public',
         'upgradeuser'              => 'api_key',
         'searchthreads'            => 'authenticated', 
+        'getunreadposts'           => 'authenticated',
+        'editusermod'              => 'authenticated',
     );
     
     // Array of actions that are user specific and require an username, ID or email for the 'value' parameter.
-    private $user_actions = array('getalerts', 'getavatar', 'getconversation', 'getconversations', 'createprofilepost', 'getuser');
+    private $user_actions = array('getalerts', 'getavatar', 'getconversation', 'getconversations', 'createprofilepost', 'getuser', 'getunreadposts','editusermod');
     
     // List of general errors, this is where the 'throwError' function gets the messages from.
     private $general_errors = array(
@@ -162,6 +164,7 @@ class RestAPI {
         23 => 'The argument for "node_type", "{ERROR}", was not found in the list available node type list: "({ERROR2})"',
         24 => 'The argument for "discussion_state", "{ERROR}", was not found in the list available discussion state list: "({ERROR2})"',
         25 => 'Arguments "{ERROR}" and "{ERROR2}" conflict. Only one allowed',
+        26 => 'Table "{ERROR}" don\'t have column "{ERROR2}"',
         
     );
 
@@ -1730,12 +1733,8 @@ class RestAPI {
                         $edit_data[$data_key] = $data_item;
                     }
                 }
+                 
                 
-                if ($this->hasAddon('dbtech_shop')){
-                    if ($this->checkIntParameter('add_points', $add_points)) {
-                        $edit_data['dbtech_shop_points'] = ($add_points + imtval($user->dbtech_shop_points));
-                    }
-                }
 
                 if (count($edit_data) == 0) {
                     // There are no fields set, throw error.
@@ -2182,7 +2181,7 @@ class RestAPI {
                 *   - api.php?action=getPosts&author=1&hash=API_KEY
                 */
                 // Init variables.
-                $conditions = array();
+                $conditions = array('message_state'=>'visible');
                 $this->setLimit(10);
                 $fetch_options = array('limit' => $this->limit);
 
@@ -3365,6 +3364,33 @@ class RestAPI {
                     $type = $this->getRequest('type');
                 }
                 $this->sendResponse($this->getXenAPI()->search($this->getRequest('value'), $order, $type));
+                /**
+                  * Edit columns from table `xf_user` added by mods / plugins
+                  */
+            case 'editusermod':
+                $edit_data = Array();
+                /**
+                  * for error
+                  */
+                $available_fields = "add_points, points_column";
+                
+                if ($this->getXenAPI()->hasAddon('dbtech_shop')){
+                    if ($this->checkIntParameter('add_points', $add_points)) {
+                        if($this->baseCheckParameter('points_column', $points_column, true)) {
+                            if(!isset($user->$points_column)) {
+                                $this->throwError(26, 'xf_user', $points_column);
+                            }
+                            $edit_data[$points_column] = ($add_points + intval($user->$points_column));
+                        }
+                    }
+                }
+                if (empty($edit_data)) {
+                    $this->throwError(8, $available_fields);
+                }
+                $smt = $this->xenAPI->getDatabase()->update('xf_user', $edit_data, 'user_id = '. $user->user_id);
+                
+                $this->sendResponse(['updated'=>$smt->rowCount(),'values'=>$edit_data]);
+                
             default:
                 // Action was supported but has not yet been added to the switch statement, throw error.
                 $this->throwError(11, $this->getAction());
