@@ -339,7 +339,7 @@ class RestAPI {
         }
     }
 
-    private function stripUserData($user) {
+    private function stripUserData($user, $light = false) {
         /*
         * Run through an additional permission check if the request is
         * not using an API key, unset some variables depending on the 
@@ -396,6 +396,12 @@ class RestAPI {
                     unset($data['upgrades']);
                 }
             }
+        }
+        if($light) {
+            foreach($data AS $k=>$v)
+                if(!in_array($k, Array('user_id','username', 'custom_title', 'register_date', 'last_activity', 'email', 'visible', 'is_banned'))) {
+                    unset($data[$k]);
+                }
         }
         return $data;
     }
@@ -527,7 +533,7 @@ class RestAPI {
             $this->user = $this->xenAPI->getUser($array[0]);
             return $this->user;
         }    
-        return NULL;
+        return new User($this->xenAPI->getModels(), Array());
     }
 
     /**
@@ -2866,11 +2872,13 @@ class RestAPI {
                     $results = [];
                     foreach ($userIds as $userId) {
                         $user = $this->getXenAPI()->getUser($userId);
-                        if (!$user->isRegistered()) {
+                        if (!$this->hasRequest('find') && !$user->isRegistered()) {
                             // Requested user was not registered, throw error.
                             $this->throwError(4, 'user', $userId);
                         }
-                        $results[] = $this->stripUserData($user); # TODO: only return user_id & username?
+                        if($user->isRegistered()) {
+                            $results[$user->getId()] = $this->stripUserData($user, !$this->isAuthenticated()); 
+                        }
                     }
                 } else if ($this->hasAPIKey() && $this->hasRequest('value') && !filter_var($this->getRequest('value'), FILTER_VALIDATE_IP) === false) {
                     $ip = $this->getRequest('value');
@@ -3373,25 +3381,27 @@ class RestAPI {
                   * for error
                   */
                 $available_fields = "add_points, points_column";
-                
+
                 if ($this->getXenAPI()->hasAddon('dbtech_shop')){
                     if ($this->checkIntParameter('add_points', $add_points)) {
                         if($this->baseCheckParameter('points_column', $points_column, true)) {
-                            if(!isset($user->$points_column)) {
+                                $user_data = $user->getData();
+                            if(!isset($user_data[$points_column])) {
                                 $this->throwError(26, 'xf_user', $points_column);
                             }
-                            $edit_data[$points_column] = ($add_points + intval($user->$points_column));
+                            $edit_data[$points_column] = ($add_points + floatval($user_data[$points_column]));
                         }
                     }
                 }
                 if (empty($edit_data)) {
                     $this->throwError(8, $available_fields);
                 }
-                $smt = $this->xenAPI->getDatabase()->update('xf_user', $edit_data, 'user_id = '. $user->user_id);
-                
-                $this->sendResponse(['updated'=>$smt->rowCount(),'values'=>$edit_data]);
-                
+                $rows = $this->xenAPI->getDatabase()->update('xf_user', $edit_data, 'user_id = '. $user_data['user_id']);
+
+                $this->sendResponse(['updated'=>$rows,'values'=>$edit_data]);
+
             default:
+
                 // Action was supported but has not yet been added to the switch statement, throw error.
                 $this->throwError(11, $this->getAction());
         }
@@ -5838,7 +5848,7 @@ class User {
     /**
     * Default constructor.
     */
-    public function __construct($models, $data) {
+    public function __construct($models, $data = NULL) {
         $this->models = $models;
         $this->data = $data;
         if (!empty($data)) {
