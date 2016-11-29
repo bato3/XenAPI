@@ -2865,6 +2865,8 @@ class RestAPI {
                 *   - api.php?action=getUsers&value=Contex
                 *   - api.php?action=getUsers&value=Cont*
                 *   - api.php?action=getUsers&value=C*
+                *   - api.php?action=getUsers&value=Contex,bato3,contex@domain.com
+                *   - api.php?action=getUsers&value=Contex,not_exists&find
                 */
 
                 if ($this->hasRequest('value') && strpos($this->getRequest('value'), ',') !== false) {
@@ -3087,7 +3089,7 @@ class RestAPI {
                 * Logins the user.
                 *
                 * EXAMPLE:
-                *   - api.php?action=login&username=USERNAME&password=PASSWORD
+                *   - api.php?action=login&username=USERNAME&password=PASSWORD&ip_address=127.0.0.1
                 */
                 if (!$this->hasRequest('username')) {
                     // The 'username' argument has not been set, throw error.
@@ -3101,14 +3103,10 @@ class RestAPI {
                 } else if (!$this->getRequest('password')) {
                     // Throw error if the 'password' argument is set but empty.
                     $this->throwError(1, 'password');
-                } else if (!$this->hasRequest('ip_address')) {
-                    // The 'ip_address' argument has not been set, throw error.
-                    $this->throwError(3, 'ip_address');
-                } else if (!$this->getRequest('ip_address')) {
-                    // Throw error if the 'ip_address' argument is set but empty.
-                    $this->throwError(1, 'ip_address');
                 }
-
+                
+                
+                
                 // Get the user object.
                 $user = $this->xenAPI->getUser($this->getRequest('username'));
                 if (!$user->isRegistered()) {
@@ -3125,7 +3123,7 @@ class RestAPI {
                         $session = $this->getXenAPI()->login(
                             $user->getID(), 
                             $user->getUsername(), 
-                            XenForo_Helper_Ip::convertIpStringToBinary($this->getRequest('ip_address'))
+                            XenForo_Helper_Ip::convertIpStringToBinary($this->get_ip())
                        );
 
                         $cookie_domain = XenForo_Application::get('config')->cookie->domain;
@@ -3147,6 +3145,14 @@ class RestAPI {
                             'cookie_expiration' => 0,
                             'cookie_secure'     => XenForo_Application::$secure
                         ));
+                        
+                        /**
+                         * Login by api.
+                         */
+                        setcookie(XenForo_Application::get('config')->cookie->prefix . 'session', $session->getSessionId(), NULL, XenForo_Application::get('config')->cookie->path, $cookie_domain, XenForo_Application::$secure);
+                        if ( $this->hasRequest('remember') &&  $this->getRequest('remember') != '') {
+                            $user->getUserModel()->setUserRememberCookie($user->getID());
+                        }
                     } else {
                         // The username or password was wrong, throw error.
                         $this->throwError(5, 'Invalid username or password!');
@@ -3375,7 +3381,7 @@ class RestAPI {
                 /**
                   * Edit columns from table `xf_user` added by mods / plugins
                   */
-            case 'editusermod':
+                        case 'editusermod':
                 $edit_data = Array();
                 /**
                   * for error
@@ -3409,14 +3415,44 @@ class RestAPI {
     }
     
     /**
-    * Send the response array in JSON.
+    * Send the response array in JSON / JSONP.
     */
     public function sendResponse($data) {
         if ($this->hasRequest('debug')) {
             $data['debug'] = $this->getXenAPI()->getDebugData();
         }
+        if ($this->hasRequest('callback')) {
+            header('Content-type: application/javascript');
+            die($this->getRequest('callback').'('.json_encode($data).')');
+        }
         header('Content-type: application/json');
         die(json_encode($data));
+    }
+    
+    /**
+      * Gest best IP address.
+      */
+    private function get_ip(){
+        
+        # Get best IP
+        $ip_address = $_SERVER['REMOTE_ADDR'];
+        if (isset($_SERVER['HTTP_CF_CONNECTING_IP']) 
+            && filter_var($_SERVER['HTTP_CF_CONNECTING_IP'], FILTER_VALIDATE_IP)) {
+                    $ip_address = $_SERVER['HTTP_CF_CONNECTING_IP'];
+        }
+        if(!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+             $IParray=array_values(array_filter(explode(',',$_SERVER['HTTP_X_FORWARDED_FOR'])));
+             $ip = end($IParray);
+             if(filter_var($ip, FILTER_VALIDATE_IP))
+                 $ip_address = $ip;
+        }
+        
+        if($this->hasRequest('ip_address') 
+            && filter_var($this->getRequest('ip_address'), FILTER_VALIDATE_IP) ) {
+                    $ip_address = $this->getRequest('ip_address');
+        }
+        
+        return $ip_address;
     }
 }
 
