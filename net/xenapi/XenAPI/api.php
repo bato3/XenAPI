@@ -125,6 +125,7 @@ class RestAPI {
         'getuserupgrade'           => 'api_key',
         'getuserupgrades'          => 'api_key',
         'login'                    => 'public', 
+        'cookielogin'              => 'public', 
         'register'                 => 'api_key',
         'search'                   => 'public',
         'upgradeuser'              => 'api_key',
@@ -3106,7 +3107,7 @@ class RestAPI {
                 }
                 
                 
-                
+
                 // Get the user object.
                 $user = $this->xenAPI->getUser($this->getRequest('username'));
                 if (!$user->isRegistered()) {
@@ -3145,19 +3146,80 @@ class RestAPI {
                             'cookie_expiration' => 0,
                             'cookie_secure'     => XenForo_Application::$secure
                         ));
-                        
-                        /**
-                         * Login by api.
-                         */
-                        setcookie(XenForo_Application::get('config')->cookie->prefix . 'session', $session->getSessionId(), NULL, XenForo_Application::get('config')->cookie->path, $cookie_domain, XenForo_Application::$secure);
-                        if ( $this->hasRequest('remember') &&  $this->getRequest('remember') != '') {
-                            $user->getUserModel()->setUserRememberCookie($user->getID());
-                        }
                     } else {
                         // The username or password was wrong, throw error.
                         $this->throwError(5, 'Invalid username or password!');
                     }
                 }
+                
+            case 'cookielogin':
+                /**
+                * Logins the user and send cookies.
+                *
+                * EXAMPLE:
+                *   - api.php?action=cookielogin&username=USERNAME&password=PASSWORD&remember=1
+                */
+                
+                if (!$this->hasRequest('username')) {
+                    // The 'username' argument has not been set, throw error.
+                    $this->throwError(3, 'username');
+                } else if (!$this->getRequest('username')) {
+                    // Throw error if the 'username' argument is set but empty.
+                    $this->throwError(1, 'username');
+                } else if (!$this->hasRequest('password')) {
+                    // The 'password' argument has not been set, throw error.
+                    $this->throwError(3, 'password');
+                } else if (!$this->getRequest('password')) {
+                    // Throw error if the 'password' argument is set but empty.
+                    $this->throwError(1, 'password');
+                }
+
+                $user = $this->xenAPI->getUser($this->getRequest('username'));
+                if (!$user->isRegistered()) {
+                    // Requested user was not registered, throw error.
+                    $this->throwError(4, 'user', $this->getRequest('username'));
+                }
+
+                $userModel = $this->xenAPI->getModels()->getUserModel();
+
+                $userId = $userModel->validateAuthentication($this->getRequest('username'), $this->getRequest('password'), $error);
+
+                if(!$userId) {
+                    $this->throwError(5, 'Invalid username or password!');
+                }
+                if ( $this->hasRequest('remember')
+                    &&  $this->getRequest('remember') != '') {
+                            $userModel->setUserRememberCookie($user->getID());
+                }
+
+                XenForo_Model_Ip::log($userId, 'user', $userId, 'login');
+
+                $userModel->deleteSessionActivity(0, $this->get_ip());
+
+                $visitor = XenForo_Visitor::setup($userId);
+
+                $session = XenForo_Session::startPublicSession();
+                $session->userLogin($userId, $visitor['password_date']);
+                $session->save();
+
+                $cookie_domain = XenForo_Application::get('config')->cookie->domain;
+
+                // Check if cookie domain is empty, grab board url and use its domain if it is empty
+                if (empty($cookie_domain)) {
+                    $url = XenForo_Application::getOptions()->boardUrl;
+                    $parse = parse_url($url);
+                    $cookie_domain = $parse['host'];
+                }
+
+                // Return data required for creating cookie
+                $this->sendResponse(array(
+                        'success' => 1
+                ));
+
+                
+                break;
+                
+                
             case 'register':
                 /**
                 * Registers a user.
